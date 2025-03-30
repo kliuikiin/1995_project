@@ -1,0 +1,112 @@
+addpath("./") 
+
+% Генерируем вэйвформу
+[waveform, info] = generateNRWaveform();
+Fs = info.ResourceGrids(1).Info.SampleRate;
+
+% Частота оригинального сигнала
+% spectrum = spectrumAnalyzer('SampleRate', Fs, 'Name', 'Original Signal Spectrum');
+% spectrum(waveform);
+% release(spectrum);
+
+% Спектрограмма оригинального сигнала
+samplerate = info.ResourceGrids(1).Info.SampleRate;
+nfft = info.ResourceGrids(1).Info.Nfft;
+figure;
+spectrogram(waveform(:,1), ones(nfft, 1), 0, nfft, 'centered', samplerate, 'yaxis', 'MinThreshold', -130);
+title('Spectrogram of Original 5G Downlink Baseband Waveform');
+
+% Расчет BER
+M = 2; % BPSK
+numBits = 1e6;
+EbNo = 1; % Чем меньше Eb/No тем больше шума
+
+% Ра
+txBits = randi([0 1], numBits, 1);
+modSig = pskmod(txBits, M); % BPSK modulation
+
+% --- Noisy Signal Analysis ---
+
+% Add AWGN noise.  Crucially, use 'measured' to ensure the noise power is
+% relative to the *signal* power.  This is essential for correct BER
+% calculation.
+rxSig = awgn(modSig, EbNo, 'measured');
+
+
+% Visualize the spectrum (Noisy Signal)
+spectrumNoisy = spectrumAnalyzer('SampleRate', Fs, 'Name', 'Noisy Signal Spectrum');
+spectrumNoisy(rxSig);  % Noisy signal for spectrum analysis
+release(spectrumNoisy);
+
+
+% Visualize the spectrogram (Noisy Signal)
+figure;
+spectrogram(rxSig, ones(nfft, 1), 0, nfft, 'centered', Fs, 'yaxis', 'MinThreshold', -130);  % Use Fs for noisy signal
+title('Spectrogram of Noisy 5G Downlink Baseband Waveform');
+
+
+
+% Demodulate
+rxBits = pskdemod(rxSig, M);
+
+% Calculate BER
+[numErrors, ber] = biterr(txBits, rxBits);
+
+% Display results
+fprintf('Number of bit errors: %d\n', numErrors);
+fprintf('Bit Error Rate (BER): %.5f\n', ber);
+
+% --- Constellation Diagram ---
+% Plot constellation diagram (Noisy Signal)
+constDiagram = comm.ConstellationDiagram('Title', 'Received Signal Constellation (Noisy)', ...
+                                        'XLimits', [-2 2], 'YLimits', [-2 2]); % Set axis limits for clearer visualization
+constDiagram(rxSig);
+
+% Plot constellation of the ORIGINAL signal, for comparison
+constDiagramOriginal = comm.ConstellationDiagram('Title', 'Original Signal Constellation', ...
+                                                  'XLimits', [-2 2], 'YLimits', [-2 2]);
+constDiagramOriginal(modSig);
+
+
+
+% --- BER Curve ---
+
+% Visualize BER curve (optional)
+EbNoVec = 0:1:15;
+berTheory = berawgn(EbNoVec, 'psk', M, 'nondiff');  % Correct usage of berawgn
+figure;
+semilogy(EbNoVec, berTheory, 'b-o');
+grid on;
+title('Theoretical BER for BPSK in AWGN');
+xlabel('Eb/No (dB)');
+ylabel('Bit Error Rate');
+hold on;  % Add the *simulated* BER to the plot
+
+% --- Simulate BER at Different Eb/No ---
+
+berSimulated = zeros(size(EbNoVec)); % Pre-allocate for speed
+
+for i = 1:length(EbNoVec)
+    rxSig_temp = awgn(modSig, EbNoVec(i), 'measured');
+    rxBits_temp = pskdemod(rxSig_temp, M);
+    [~, berSimulated(i)] = biterr(txBits, rxBits_temp);
+end
+
+semilogy(EbNoVec, berSimulated, 'r-x', 'DisplayName', 'Simulated BER');
+legend('Theoretical BER', 'Simulated BER'); % Add a legend
+hold off;
+
+
+% --- Comparison Summary ---
+fprintf('\n--- Comparison Summary ---\n');
+fprintf('Original Signal:\n');
+fprintf('  - No noise added, ideal for visualization of the intended signal structure.\n');
+fprintf('Noisy Signal (Eb/No = %.1f dB):\n', EbNo);
+fprintf('  - AWGN added, simulating real-world transmission impairments.\n');
+fprintf('  - Bit Error Rate (BER): %.5f\n', ber);
+fprintf('  - Observe the spreading in the constellation diagram due to noise.\n');
+fprintf('  - The spectrogram shows increased noise floor compared to the original.\n');
+fprintf('  - The spectrum analyzer shows a wider, less defined spectrum.\n');
+fprintf('BER Curve:\n');
+fprintf('  - The theoretical BER curve shows the expected performance.\n');
+fprintf('  - The simulated BER curve shows the actual performance, which should approach the theoretical curve as the number of bits increases.\n');
